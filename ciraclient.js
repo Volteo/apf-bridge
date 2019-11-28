@@ -1,6 +1,6 @@
 /**
 * @description APF/CIRA Client
-* @author Joko Sastriawan 
+* @author Joko Sastriawan
 * @copyright Intel Corporation 2019
 * @license Apache-2.0
 * @version v0.0.1
@@ -14,6 +14,7 @@ module.exports.CreateCiraClient = function (parent, args) {
     obj.common = require('./common.js');
     obj.constants = require('constants');
     obj.net = require('net');
+    obj.request = require('request-promise-native');
     obj.forwardClient = null;
     obj.downlinks = {};
     obj.pfwd_idx = 0;
@@ -25,7 +26,7 @@ module.exports.CreateCiraClient = function (parent, args) {
             console.log(str);
         }
     }
-    // CIRA state     
+    // CIRA state
     var CIRASTATE = {
         INITIAL: 0,
         PROTOCOL_VERSION_SENT: 1,
@@ -223,6 +224,23 @@ module.exports.CreateCiraClient = function (parent, args) {
         Debug("CIRA: Send keepalive reply");
     }
 
+    async function AddKerberosHeader(chan_data) {
+        try {
+            ticket = await obj.request(args.kerbticketurl)
+
+            var arr = chan_data.split("\r\n");
+            if (arr[1].startsWith("Authorization")) {
+                arr[1] = "Authorization: " + ticket;
+                Debug(`Authorization Header replaced`);
+            }
+            var data = arr.join("\r\n");
+            return data;
+        } catch(error) {
+            console.error(`Unable to get kerberos ticket: ${error}`)
+            return chan_data;
+        }
+    }
+
     function ProcessData(socket) {
         var cmd = socket.tag.accumulator.charCodeAt(0);
         var len = socket.tag.accumulator.length;
@@ -257,7 +275,7 @@ module.exports.CreateCiraClient = function (parent, args) {
                         Debug("CIRA: Start keep alive for every " + obj.args.keepalive + " ms.");
                         obj.timer = setInterval(function () {
                             SendKeepAliveRequest(obj.forwardClient);
-                        }, obj.args.mpskeepalive);// 
+                        }, obj.args.mpskeepalive);//
                     }
                     return 5;
                 }
@@ -342,12 +360,22 @@ module.exports.CreateCiraClient = function (parent, args) {
                 var chan_data = data.substring(9, 9 + chan_data_len);
                 if (obj.downlinks[rcpt_chan]) {
                     try {
-                        obj.downlinks[rcpt_chan].write(chan_data, 'binary', function () {
-                            Debug("Write completed.");
-                            SendChannelWindowAdjust(socket, rcpt_chan, chan_data_len);//I have full window capacity now
-                        });
+                        if (obj.args.clientauth === "kerberos") {
+                            AddKerberosHeader(chan_data).then(data => {
+                                chan_data = data
+                                obj.downlinks[rcpt_chan].write(chan_data, 'binary', function () {
+                                    Debug("Write completed.");
+                                    SendChannelWindowAdjust(socket, rcpt_chan, chan_data_len);//I have full window capacity now
+                                });
+                            });
+                        } else {
+                            obj.downlinks[rcpt_chan].write(chan_data, 'binary', function () {
+                                Debug("Write completed.");
+                                SendChannelWindowAdjust(socket, rcpt_chan, chan_data_len);//I have full window capacity now
+                            });
+                        }
                     } catch (e) {
-                        Debug("Cannot forward data to downlink socket.");
+                        Debug("Cannot forward data to downlink socket");
                     }
                 }
                 return 9 + chan_data_len;
@@ -374,7 +402,7 @@ module.exports.CreateCiraClient = function (parent, args) {
             target_address: "", //to be filled later
             target_port: 0, //to be filled later
             origin_address: "", //to be filled later
-            origin_port: 0, //to be filled later            
+            origin_port: 0, //to be filled later
         };
         var chan_type_slen = obj.common.ReadInt(data, 1);
         result.chan_type = data.substring(5, 5 + chan_type_slen);
@@ -441,7 +469,7 @@ module.exports.CreateCiraClient = function (parent, args) {
             var net = require("net");
             obj.proxysocket = new net.Socket();
             obj.proxysocket.proxy_established = false;
-            obj.proxysocket.proto_state = 0;//0: not started, 1: auth received; 2: proxy tunnel established            
+            obj.proxysocket.proto_state = 0;//0: not started, 1: auth received; 2: proxy tunnel established
             obj.proxysocket.connect(obj.args.proxyport, obj.args.proxyhost, function () {
                 if (obj.args.proxytype == "http") {
                     // handle http proxy
@@ -453,12 +481,12 @@ module.exports.CreateCiraClient = function (parent, args) {
                     obj.proxysocket.write(connect_request);
                     //Debug(connect_request);
                 } else if (obj.args.proxytype == "socks") {
-                    // send authentication query packet 
+                    // send authentication query packet
                     // 0x05: SOCKS v5
                     // 0x02: two mode of authentication supported
                     // 0x00: no auth
                     // 0x02: username/password
-                    obj.proxysocket.write(Buffer.from([0x05, 0x02, 0x00, 0x02]));                    
+                    obj.proxysocket.write(Buffer.from([0x05, 0x02, 0x00, 0x02]));
                 } else {
                     Debug("Unsupported proxy type: " + obj.args.proxytype);
                 }
@@ -475,7 +503,7 @@ module.exports.CreateCiraClient = function (parent, args) {
                             obj.forwardClient = obj.tls.connect(obj.tlsoptions,obj.onSecureConnect);
                             obj.forwardClient.on('error', function(e) {
                                 Debug('TLS Error:'+e);
-                            });                
+                            });
                         }
                     } else {
                         //Debug("Socket data: " + chunk);
@@ -484,7 +512,7 @@ module.exports.CreateCiraClient = function (parent, args) {
                     if (obj.proxysocket.proto_state == 0) {
                         //Debug("Stage 1: check if Socks5 and no auth are supported");
                         // see if protocol is Socks v5 and support no auth
-                        if (chunk.length >= 2 && chunk[0] == 0x05 && chunk[1] == 0x00) {                            
+                        if (chunk.length >= 2 && chunk[0] == 0x05 && chunk[1] == 0x00) {
                             // send socks5 (0x05), connect (0x01), reserved (0x00), ip (0x1)/dns (0x03), len, fqdn, htons(port)
                             // total length = 7 + fqdn length
                             var fqdn = Buffer.from(obj.args.mpshost);
@@ -497,7 +525,7 @@ module.exports.CreateCiraClient = function (parent, args) {
                                 //parse IP
                                 var octets = fqdn.toString().trim().split(".");
                                 for (i=0;i<4;i++) {
-                                    var parsed = parseInt(octets[i],10);                                    
+                                    var parsed = parseInt(octets[i],10);
                                     if (isNaN(parsed)) {
                                         pkt[4+i]=0;
                                     } else {
@@ -506,7 +534,7 @@ module.exports.CreateCiraClient = function (parent, args) {
                                 }
                                 pkt[8] = (0xff & (obj.args.mpsport >> 8));
                                 pkt[9] = (0xff & (obj.args.mpsport));
-                                pkt = pkt.slice(0,10);                             
+                                pkt = pkt.slice(0,10);
                                 //Debug(pkt.length);
                             } else {
                                 pkt[3] = 0x03;
@@ -517,7 +545,7 @@ module.exports.CreateCiraClient = function (parent, args) {
                                 pkt[pkt.length - 2] = (0xff & (obj.args.mpsport >> 8));
                                 pkt[pkt.length - 1] = (0xff & (obj.args.mpsport));
                             }
-                            
+
                             obj.proxysocket.proto_state = 1;
                             try {
                                 obj.proxysocket.write(pkt);
@@ -537,7 +565,7 @@ module.exports.CreateCiraClient = function (parent, args) {
                             // dont care about the rest :)
                             obj.proxysocket.proto_state = 0;
                             obj.proxysocket.proxy_established = true;
-                            // Establish TLS 
+                            // Establish TLS
                             Debug("SOCKS5 Proxy Connection established");
                             obj.tlsoptions.socket = obj.proxysocket;
                             obj.forwardClient = obj.tls.connect(obj.tlsoptions,obj.onSecureConnect);
