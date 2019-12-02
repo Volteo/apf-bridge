@@ -1,0 +1,14 @@
+{
+  "name": "apf-bridge",
+  "version": "1.0.0",
+  "description": "APF Bridge",
+  "main": "mainbridge.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Volteo/apf-bridge.git"
+  },
+  "dependencies": {
+    "request": "2.88.0",
+    "request-promise-native": "1.0.8"
+  }
+}

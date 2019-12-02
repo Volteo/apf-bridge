@@ -1,6 +1,6 @@
 /**
 * @description APF/CIRA Example bridge
-* @author Joko Sastriawan 
+* @author Joko Sastriawan
 * @copyright Intel Corporation 2019
 * @license Apache-2.0
 * @version v0.0.1
@@ -40,7 +40,8 @@ var args = {
     mpsport: config.mps.mpsport,
     mpsuser: config.mps.mpsuser,
     mpspass: config.mps.mpspass,
-    mpskeepalive: config.mps.mpskeepalive
+    mpskeepalive: config.mps.mpskeepalive,
+    kerbticketurl: config.kerbticketurl
 };
 
 if (config.proxy && config.proxy !=null) {
@@ -53,8 +54,9 @@ for (i=0; i<config.clients.length; i++) {
     args.clientname = config.clients[i].clientname;
     args.clientaddress = config.clients[i].clientaddress;
     args.clientuuid = config.clients[i].clientuuid;
-    obj.ciraclients[0] = require('./ciraclient.js').CreateCiraClient(obj, args);
-    obj.ciraclients[0].connect();
+    args.clientauth = config.clients[i].clientauth;
+    obj.ciraclients[i] = require('./ciraclient.js').CreateCiraClient(obj, args);
+    obj.ciraclients[i].connect();
 }
 
 
